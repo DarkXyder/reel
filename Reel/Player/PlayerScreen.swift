@@ -272,6 +272,13 @@ struct PlayerSettingsSheet: View {
                     }
                 }
 
+                Section("Subtitle size") {
+                    Picker("Size", selection: Binding(get: { model.subtitleSize }, set: { model.setSubtitleSize($0) })) {
+                        ForEach(SubtitleSize.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 Section {
                     stepperRow("Subtitle delay", value: model.subtitleDelay) { model.setSubtitleDelay($0) }
                     stepperRow("Audio delay", value: model.audioDelay) { model.setAudioDelay($0) }

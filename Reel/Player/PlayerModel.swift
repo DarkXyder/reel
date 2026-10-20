@@ -16,6 +16,26 @@ struct PlayRequest: Identifiable {
     let resumeAt: Double?
 }
 
+/// Subtitle text size, remembered across videos.
+enum SubtitleSize: String, CaseIterable, Identifiable {
+    case small = "Small", normal = "Normal", large = "Large", extraLarge = "Extra large"
+    var id: String { rawValue }
+
+    /// VLC's --sub-text-scale, in percent (applied when a video starts).
+    var scale: Int {
+        switch self { case .small: return 75; case .normal: return 100; case .large: return 135; case .extraLarge: return 175 }
+    }
+
+    /// VLC's relative font size (smaller number = bigger text), used to change it during playback.
+    var relativeFontSize: Int {
+        switch self { case .small: return 20; case .normal: return 16; case .large: return 12; case .extraLarge: return 9 }
+    }
+
+    static var saved: SubtitleSize {
+        SubtitleSize(rawValue: UserDefaults.standard.string(forKey: "subtitleSize") ?? "") ?? .normal
+    }
+}
+
 /// Wraps VLCMediaPlayer. Polls twice a second instead of using delegate callbacks: simpler, and the
 /// cost is negligible next to video decoding.
 @MainActor
@@ -45,6 +65,7 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var subtitleDelay: Double = 0   // seconds, + = later
     @Published private(set) var audioDelay: Double = 0      // seconds, + = later
     @Published private(set) var videoSize: CGSize = .zero
+    @Published private(set) var subtitleSize: SubtitleSize = .saved
 
     private var timer: Timer?
     private var background: NSObjectProtocol?
@@ -69,6 +90,8 @@ final class PlayerModel: ObservableObject {
             media.addOption(":http-referrer=\(ref)")
         }
         media.addOption(":network-caching=3000")
+        media.addOption(":sub-text-scale=\(subtitleSize.scale)")
+        media.addOption(":freetype-rel-fontsize=\(subtitleSize.relativeFontSize)")
         if let resume = request.resumeAt, resume > 5 {
             media.addOption(":start-time=\(Int(resume))")
         }
@@ -117,6 +140,22 @@ final class PlayerModel: ObservableObject {
         player.currentVideoSubTitleIndex = id
         currentSubtitle = id
         selectedExternal = nil
+    }
+
+    func setSubtitleSize(_ size: SubtitleSize) {
+        subtitleSize = size
+        UserDefaults.standard.set(size.rawValue, forKey: "subtitleSize")
+        // Live change; VLCKit 3 exposes this as -setTextRendererFontSize:.
+        let sel = NSSelectorFromString("setTextRendererFontSize:")
+        if player.responds(to: sel) {
+            player.perform(sel, with: NSNumber(value: size.relativeFontSize))
+        }
+        // Re-select the current subtitle track so it is redrawn at the new size.
+        let current = player.currentVideoSubTitleIndex
+        if current != -1 {
+            player.currentVideoSubTitleIndex = -1
+            player.currentVideoSubTitleIndex = current
+        }
     }
 
     func setRate(_ r: Float) {

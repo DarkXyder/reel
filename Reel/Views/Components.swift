@@ -53,6 +53,8 @@ struct ProgressOverlay: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
             }
+            // Fill the whole thumbnail so the bar sits on its bottom edge, not in the middle.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .allowsHitTesting(false)
         }
     }
