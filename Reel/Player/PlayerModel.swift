@@ -40,6 +40,11 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var currentSubtitle: Int32 = -1
     @Published var externalSubtitles: [Subtitle] = []
     @Published private(set) var loadedExternal: Set<String> = []
+    @Published private(set) var selectedExternal: String?
+    @Published private(set) var rate: Float = 1
+    @Published private(set) var subtitleDelay: Double = 0   // seconds, + = later
+    @Published private(set) var audioDelay: Double = 0      // seconds, + = later
+    @Published private(set) var videoSize: CGSize = .zero
 
     private var timer: Timer?
     private var lastSaved: Double = 0
@@ -103,17 +108,35 @@ final class PlayerModel: ObservableObject {
     func selectSubtitle(_ id: Int32) {
         player.currentVideoSubTitleIndex = id
         currentSubtitle = id
+        selectedExternal = nil
+    }
+
+    func setRate(_ r: Float) {
+        player.rate = r
+        rate = r
+    }
+
+    func setSubtitleDelay(_ seconds: Double) {
+        subtitleDelay = (seconds * 10).rounded() / 10
+        player.currentVideoSubTitleDelay = Int(subtitleDelay * 1_000_000) // microseconds
+    }
+
+    func setAudioDelay(_ seconds: Double) {
+        audioDelay = (seconds * 10).rounded() / 10
+        player.currentAudioPlaybackDelay = Int(audioDelay * 1_000_000) // microseconds
     }
 
     /// External subtitles from add-ons are loaded into VLC only when picked.
     func selectExternal(_ sub: Subtitle) {
         guard let url = URL(string: sub.url) else { return }
         if !loadedExternal.contains(sub.identity) {
+            // VLC appends the file as a new subtitle track and switches to it.
             player.addPlaybackSlave(url, type: .subtitle, enforce: true)
             loadedExternal.insert(sub.identity)
         } else if let t = subtitleTracks.last {
-            selectSubtitle(t.id)
+            player.currentVideoSubTitleIndex = t.id
         }
+        selectedExternal = sub.identity
     }
 
     private func tick() {
@@ -128,6 +151,8 @@ final class PlayerModel: ObservableObject {
         case .ended: ended = true; isBuffering = false
         default: isBuffering = false
         }
+        let size = player.videoSize
+        if size.width > 0 && size.height > 0 && size != videoSize { videoSize = size }
         refreshTracks()
         saveProgress(force: false)
     }
