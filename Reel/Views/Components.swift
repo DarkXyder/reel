@@ -28,13 +28,46 @@ struct PosterImage: View {
     }
 }
 
+/// Saved-progress bar along the bottom of a thumbnail; a checkmark once watched.
+struct ProgressOverlay: View {
+    let progress: VideoProgress?
+
+    var body: some View {
+        if let p = progress, p.fraction > 0.01 {
+            ZStack(alignment: .bottomLeading) {
+                if p.isWatched {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.accentColor)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.black.opacity(0.55))
+                        Capsule().fill(Color.accentColor).frame(width: max(4, g.size.width * p.fraction))
+                    }
+                }
+                .frame(height: 4)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 struct PosterCard: View {
     let meta: MetaPreview
     var width: CGFloat = 112
+    @EnvironmentObject private var library: LibraryStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             PosterImage(url: meta.poster).frame(width: width)
+                .overlay(ProgressOverlay(progress: meta.type == "series" ? nil
+                                         : library.progress(metaId: meta.id, videoId: meta.id)))
             Text(meta.name).font(.caption).lineLimit(1).frame(width: width, alignment: .leading)
         }
     }
@@ -48,14 +81,8 @@ struct ContinueCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
                 PosterImage(url: entry.background ?? entry.poster, landscape: true).frame(width: 220)
-                GeometryReader { g in
-                    Capsule().fill(Color.white.opacity(0.25)).frame(height: 3)
-                        .overlay(alignment: .leading) {
-                            Capsule().fill(Color.accentColor).frame(width: g.size.width * entry.progress, height: 3)
-                        }
-                }
-                .frame(height: 3)
-                .padding(8)
+                    .overlay(ProgressOverlay(progress: VideoProgress(position: entry.position, duration: entry.duration,
+                                                                     updatedAt: entry.updatedAt)))
             }
             .frame(width: 220)
             Text(entry.name).font(.caption.weight(.semibold)).lineLimit(1)

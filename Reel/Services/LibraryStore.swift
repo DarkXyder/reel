@@ -1,5 +1,17 @@
 import Foundation
 
+/// Where you stopped in one video (a movie, an episode, a file).
+struct VideoProgress: Codable, Hashable {
+    var position: Double   // seconds
+    var duration: Double   // seconds
+    var updatedAt: Date
+
+    var fraction: Double { duration > 0 ? min(1, position / duration) : 0 }
+    var isWatched: Bool { fraction >= 0.92 }
+    /// Worth resuming: past the first half-minute and not finished.
+    var isResumable: Bool { position > 30 && !isWatched }
+}
+
 /// One title the user saved or watched, with where they stopped.
 struct LibraryEntry: Codable, Hashable, Identifiable {
     var id: String          // meta id, e.g. "tt0944947"
@@ -10,9 +22,11 @@ struct LibraryEntry: Codable, Hashable, Identifiable {
     var inLibrary: Bool
     var lastVideoId: String?   // episode id for series ("tt0944947:1:2"), meta id for movies
     var lastVideoTitle: String?
-    var position: Double       // seconds
+    var position: Double       // seconds, in lastVideoId
     var duration: Double       // seconds
     var updatedAt: Date
+    /// Progress of every video of this title, by video id. Optional so older saves still load.
+    var videos: [String: VideoProgress]?
 
     var progress: Double { duration > 0 ? min(1, position / duration) : 0 }
 
@@ -55,10 +69,21 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
+    /// Saved progress of one video, if it was played.
+    func progress(metaId: String, videoId: String) -> VideoProgress? {
+        guard let e = entries[metaId] else { return nil }
+        if let p = e.videos?[videoId] { return p }
+        // saves from before per-video tracking
+        if e.lastVideoId == videoId, e.duration > 0 {
+            return VideoProgress(position: e.position, duration: e.duration, updatedAt: e.updatedAt)
+        }
+        return nil
+    }
+
     /// Where to resume this video, if it was left part-way.
     func resumePosition(metaId: String, videoId: String) -> Double? {
-        guard let e = entries[metaId], e.lastVideoId == videoId, e.isInProgress else { return nil }
-        return e.position
+        guard let p = progress(metaId: metaId, videoId: videoId), p.isResumable else { return nil }
+        return p.position
     }
 
     func recordProgress(_ meta: MetaPreview, videoId: String, videoTitle: String?, position: Double, duration: Double) {
@@ -69,6 +94,9 @@ final class LibraryStore: ObservableObject {
         e.position = position
         e.duration = duration
         e.updatedAt = Date()
+        var videos = e.videos ?? [:]
+        videos[videoId] = VideoProgress(position: position, duration: duration, updatedAt: e.updatedAt)
+        e.videos = videos
         entries[meta.id] = e
         save()
     }
@@ -83,7 +111,7 @@ final class LibraryStore: ObservableObject {
     private func entry(for meta: MetaPreview) -> LibraryEntry {
         entries[meta.id] ?? LibraryEntry(id: meta.id, type: meta.type, name: meta.name, poster: meta.poster,
                                          background: meta.background, inLibrary: false, lastVideoId: nil,
-                                         lastVideoTitle: nil, position: 0, duration: 0, updatedAt: Date())
+                                         lastVideoTitle: nil, position: 0, duration: 0, updatedAt: Date(), videos: nil)
     }
 
     private func save() {

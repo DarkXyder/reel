@@ -47,6 +47,7 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var videoSize: CGSize = .zero
 
     private var timer: Timer?
+    private var background: NSObjectProtocol?
     private var lastSaved: Double = 0
     private let onProgress: (Double, Double) -> Void
 
@@ -78,12 +79,19 @@ final class PlayerModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // Save where we are if the app is sent to the background or closed.
+        background = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification,
+                                                            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.saveProgress(force: true) }
+        }
     }
 
     func stop() {
         saveProgress(force: true)
         timer?.invalidate()
         timer = nil
+        if let background { NotificationCenter.default.removeObserver(background) }
+        background = nil
         player.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -148,7 +156,9 @@ final class PlayerModel: ObservableObject {
         switch player.state {
         case .buffering, .opening: isBuffering = !player.isPlaying
         case .error: failed = true; isBuffering = false
-        case .ended: ended = true; isBuffering = false
+        case .ended:
+            if !ended, duration > 0 { onProgress(duration, duration) } // finished: mark as watched
+            ended = true; isBuffering = false
         default: isBuffering = false
         }
         let size = player.videoSize
@@ -174,7 +184,7 @@ final class PlayerModel: ObservableObject {
 
     private func saveProgress(force: Bool) {
         guard duration > 0, time > 0 else { return }
-        if force || abs(time - lastSaved) >= 10 {
+        if force || abs(time - lastSaved) >= 5 {
             lastSaved = time
             onProgress(time, duration)
         }

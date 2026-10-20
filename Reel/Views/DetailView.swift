@@ -15,6 +15,14 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 actions.padding(.horizontal)
+                if !isSeries, let p = library.progress(metaId: preview.id, videoId: preview.id), p.fraction > 0.01 {
+                    HStack(spacing: 10) {
+                        ProgressView(value: p.fraction).tint(Color.accentColor)
+                        Text(p.isWatched ? "Watched" : "\(remaining(p)) left")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+                }
                 if let d = meta?.description ?? preview.description {
                     Text(d).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
                 }
@@ -121,17 +129,12 @@ struct DetailView: View {
                     streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: v.id,
                                               videoTitle: "S\(v.season ?? season)E\(v.episodeNumber) · \(v.displayTitle)")
                 } label: {
-                    EpisodeRow(video: v, progress: progress(for: v.id))
+                    EpisodeRow(video: v, progress: library.progress(metaId: preview.id, videoId: v.id))
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal)
             }
         }
-    }
-
-    private func progress(for videoId: String) -> Double? {
-        guard let e = library.entries[preview.id], e.lastVideoId == videoId, e.isInProgress else { return nil }
-        return e.progress
     }
 
     private func load() async {
@@ -156,18 +159,17 @@ struct DetailView: View {
 
 struct EpisodeRow: View {
     let video: Video
-    let progress: Double?
+    let progress: VideoProgress?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            ZStack(alignment: .bottomLeading) {
-                PosterImage(url: video.thumbnail, landscape: true).frame(width: 140)
-                if let progress {
-                    Capsule().fill(Color.accentColor).frame(width: 140 * progress, height: 3).padding(.bottom, 2)
-                }
-            }
+            PosterImage(url: video.thumbnail, landscape: true).frame(width: 140)
+                .overlay(ProgressOverlay(progress: progress))
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(video.episodeNumber). \(video.displayTitle)").font(.subheadline.weight(.semibold)).lineLimit(2)
+                if let p = progress, p.isResumable {
+                    Text("\(remaining(p)) left").font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
                 if let s = video.summary {
                     Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
@@ -176,6 +178,11 @@ struct EpisodeRow: View {
         }
         .contentShape(Rectangle())
     }
+}
+
+func remaining(_ p: VideoProgress) -> String {
+    let m = max(1, Int((p.duration - p.position) / 60))
+    return m >= 60 ? "\(m / 60) h \(m % 60) min" : "\(m) min"
 }
 
 /// What to find streams for.
