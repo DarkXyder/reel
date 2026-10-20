@@ -1,0 +1,9 @@
+Reel.xcodeproj/
+Reel.xcworkspace/
+Pods/
+Podfile.lock
+build/
+Payload/
+*.ipa
+Reel/Info.plist
+.DS_Store

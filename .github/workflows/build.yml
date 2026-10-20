@@ -1,0 +1,66 @@
+# Builds an unsigned Reel.ipa on GitHub's Mac runners. Install it with SideStore / iloader,
+# which sign it with your Apple ID. The newest build is always at Releases -> "latest".
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          brew install xcodegen
+          xcodebuild -version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Pods
+        run: pod install --repo-update
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -workspace Reel.xcworkspace -scheme Reel -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee build.log | grep -E "error:|warning: .*Reel/|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/Reel.app
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Reel.app Payload/
+          zip -qry Reel.ipa Payload
+          ls -lh Reel.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Reel-ipa
+          path: Reel.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Publish to the "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          prerelease: true
+          make_latest: false
+          body: "Unsigned build of ${{ github.sha }}. Download Reel.ipa on your iPhone and open it with SideStore."
+          files: Reel.ipa
