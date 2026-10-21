@@ -38,6 +38,7 @@ struct DetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .task { await load() }
         .sheet(item: $streamsFor) { target in
             StreamsView(target: target)
@@ -55,6 +56,11 @@ struct DetailView: View {
                 .frame(maxWidth: .infinity)
                 .clipShape(Rectangle())
                 .overlay(LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .center, endPoint: .bottom))
+                // Darken the top so the back button stays readable on bright artwork.
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 130)
+                }
             VStack(alignment: .leading, spacing: 4) {
                 Text(meta?.name ?? preview.name).font(.largeTitle.weight(.bold)).lineLimit(2)
                 HStack(spacing: 10) {
@@ -82,7 +88,8 @@ struct DetailView: View {
                 .controlSize(.large)
             } else if let e = library.entries[preview.id], e.isInProgress, let vid = e.lastVideoId {
                 Button {
-                    streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: vid, videoTitle: e.lastVideoTitle)
+                    streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: vid, videoTitle: e.lastVideoTitle,
+                                              episodes: orderedEpisodes)
                 } label: {
                     Label("Resume \(e.lastVideoTitle ?? "")", systemImage: "play.fill").lineLimit(1).frame(maxWidth: .infinity)
                 }
@@ -99,6 +106,15 @@ struct DetailView: View {
     }
 
     private var currentPreview: MetaPreview { meta?.preview ?? preview }
+
+    /// Season 1… in order, specials (season 0) last.
+    private var orderedEpisodes: [Video] {
+        (meta?.videos ?? []).sorted { a, b in
+            let sa = a.season ?? 1, sb = b.season ?? 1
+            if sa != sb { return sa == 0 ? false : (sb == 0 ? true : sa < sb) }
+            return a.episodeNumber < b.episodeNumber
+        }
+    }
 
     private func resumeLabel(videoId: String) -> String {
         library.resumePosition(metaId: preview.id, videoId: videoId) != nil ? "Resume" : "Watch"
@@ -127,7 +143,7 @@ struct DetailView: View {
             ForEach((meta?.videos ?? []).filter { ($0.season ?? 1) == season }.sorted { $0.episodeNumber < $1.episodeNumber }) { v in
                 Button {
                     streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: v.id,
-                                              videoTitle: "S\(v.season ?? season)E\(v.episodeNumber) · \(v.displayTitle)")
+                                              videoTitle: NextEpisode.title(v), episodes: orderedEpisodes)
                 } label: {
                     EpisodeRow(video: v, progress: library.progress(metaId: preview.id, videoId: v.id))
                 }
@@ -191,5 +207,7 @@ struct StreamTarget: Identifiable {
     let type: String
     let videoId: String
     let videoTitle: String?
+    /// All episodes in order, so the player can go on to the next one.
+    var episodes: [Video] = []
     var id: String { videoId }
 }

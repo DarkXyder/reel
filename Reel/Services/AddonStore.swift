@@ -1,7 +1,7 @@
 import Foundation
 
 /// One catalog of one add-on.
-struct CatalogRef: Identifiable {
+struct CatalogRef: Identifiable, Hashable {
     let addon: InstalledAddon
     let catalog: CatalogDef
     var id: String { addon.id + "|" + catalog.identity }

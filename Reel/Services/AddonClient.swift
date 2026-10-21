@@ -49,8 +49,10 @@ struct AddonClient {
         }
     }
 
-    func catalog(_ addon: InstalledAddon, _ catalog: CatalogDef, search: String? = nil, skip: Int = 0) async throws -> [MetaPreview] {
+    func catalog(_ addon: InstalledAddon, _ catalog: CatalogDef, search: String? = nil, genre: String? = nil,
+                 skip: Int = 0) async throws -> [MetaPreview] {
         var extras: [(String, String)] = []
+        if let genre { extras.append(("genre", genre)) }
         if let search { extras.append(("search", search)) }
         if skip > 0 { extras.append(("skip", String(skip))) }
         let response: CatalogResponse = try await get(resourceURL(addon, "catalog", catalog.type, catalog.id, extras))

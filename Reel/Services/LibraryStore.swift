@@ -101,6 +101,27 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
+    /// Progress from another device (Trakt). Doesn't move "last watched" back in time.
+    func importProgress(_ meta: MetaPreview, videoId: String, videoTitle: String?, position: Double,
+                        duration: Double, date: Date) {
+        guard duration > 0 else { return }
+        var e = entry(for: meta)
+        if e.poster == nil { e.poster = meta.poster; e.background = meta.background }
+        if e.name == e.id { e.name = meta.name }
+        var videos = e.videos ?? [:]
+        videos[videoId] = VideoProgress(position: position, duration: duration, updatedAt: date)
+        e.videos = videos
+        if date >= e.updatedAt || e.lastVideoId == nil {
+            e.lastVideoId = videoId
+            e.lastVideoTitle = videoTitle
+            e.position = position
+            e.duration = duration
+            e.updatedAt = date
+        }
+        entries[meta.id] = e
+        save()
+    }
+
     func clearProgress(_ id: String) {
         guard var e = entries[id] else { return }
         e.position = 0

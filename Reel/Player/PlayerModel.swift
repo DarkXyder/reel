@@ -5,7 +5,7 @@ import UIKit
 
 /// Everything needed to start playback, created by the streams list.
 struct PlayRequest: Identifiable {
-    let id = UUID()
+    var id = UUID()
     let url: URL
     let meta: MetaPreview
     let type: String
@@ -13,7 +13,18 @@ struct PlayRequest: Identifiable {
     let videoTitle: String?
     let streamSubtitles: [Subtitle]
     let headers: [String: String]
-    let resumeAt: Double?
+    var resumeAt: Double?
+    /// Add-on and binge group the stream came from: the next episode is taken from the same place.
+    var addonId: String? = nil
+    var bingeGroup: String? = nil
+    /// "mkv", "mp4", "m3u8"… decides between VLC and Apple's player in Auto mode.
+    var fileExtension: String? = nil
+    /// All episodes of the series in order (empty for movies), for "next episode".
+    var episodes: [Video] = []
+    /// Set when the user switches player mid-video.
+    var forcePlayer: PlayerMode? = nil
+
+    var isEpisode: Bool { !episodes.isEmpty }
 }
 
 /// Subtitle text size, remembered across videos.
@@ -69,6 +80,7 @@ final class PlayerModel: ObservableObject {
 
     private var timer: Timer?
     private var background: NSObjectProtocol?
+    private lazy var reporter = PlaybackReporter(request: request)
     private var lastSaved: Double = 0
     private let onProgress: (Double, Double) -> Void
 
@@ -110,7 +122,9 @@ final class PlayerModel: ObservableObject {
     }
 
     func stop() {
+        guard timer != nil else { return } // already stopped
         saveProgress(force: true)
+        reporter.stop(fraction: duration > 0 ? time / duration : 0)
         timer?.invalidate()
         timer = nil
         if let background { NotificationCenter.default.removeObserver(background) }
@@ -192,6 +206,7 @@ final class PlayerModel: ObservableObject {
         time = max(0, ms / 1000)
         duration = max(0, len / 1000)
         isPlaying = player.isPlaying
+        if duration > 0 { reporter.update(playing: isPlaying, fraction: time / duration) }
         switch player.state {
         case .buffering, .opening: isBuffering = !player.isPlaying
         case .error: failed = true; isBuffering = false

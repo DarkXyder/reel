@@ -2,9 +2,13 @@ import SwiftUI
 
 @main
 struct ReelApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var addons = AddonStore()
     @StateObject private var library = LibraryStore()
     @StateObject private var debrid = DebridService()
+    @StateObject private var settings = AppSettings.shared
+    @StateObject private var downloads = DownloadManager.shared
+    @StateObject private var trakt = TraktService.shared
 
     init() {
         // Posters are loaded with AsyncImage, which uses the shared URL cache.
@@ -17,7 +21,15 @@ struct ReelApp: App {
                 .environmentObject(addons)
                 .environmentObject(library)
                 .environmentObject(debrid)
+                .environmentObject(settings)
+                .environmentObject(downloads)
+                .environmentObject(trakt)
                 .preferredColorScheme(.dark)
+                .tint(Color.accentColor)
+                .task {
+                    // Bring in progress from other devices.
+                    if trakt.isConnected { await trakt.importProgress(into: library, addons: addons) }
+                }
         }
     }
 }

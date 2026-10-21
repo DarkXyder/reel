@@ -53,6 +53,11 @@ struct CatalogDef: Codable, Hashable, Identifiable {
         return extra?.contains { $0.isRequired == true } ?? false
     }
 
+    /// Genre choices the add-on offers for this catalog.
+    var genres: [String] {
+        extra?.first(where: { $0.name == "genre" })?.options ?? []
+    }
+
     var supportsSearch: Bool {
         if extra?.contains(where: { $0.name == "search" }) == true { return true }
         return extraSupported?.contains("search") == true || extraRequired?.contains("search") == true

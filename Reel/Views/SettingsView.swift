@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var addons: AddonStore
     @EnvironmentObject private var debrid: DebridService
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var trakt: TraktService
 
     var body: some View {
         List {
@@ -15,6 +17,27 @@ struct SettingsView: View {
                     Label("Debrid account", systemImage: "key")
                         .badge(debrid.hasKey ? debrid.provider.rawValue : "Off")
                 }
+                NavigationLink { TraktSettingsView() } label: {
+                    Label("Trakt", systemImage: "arrow.triangle.2.circlepath")
+                        .badge(trakt.username ?? (trakt.isConnected ? "On" : "Off"))
+                }
+            }
+
+            Section {
+                Picker("Player", selection: $settings.playerMode) {
+                    ForEach(PlayerMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Toggle("Play next episode automatically", isOn: $settings.autoPlayNext)
+                Stepper(value: $settings.skipIntroSeconds, in: 0...300, step: 5) {
+                    LabeledContent("Skip intro jumps", value: settings.skipIntroSeconds == 0 ? "Off" : "\(settings.skipIntroSeconds) s")
+                }
+                Picker("Sort streams by", selection: $settings.streamSort) {
+                    ForEach(StreamSort.allCases) { Text($0.rawValue).tag($0) }
+                }
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("Auto uses Apple's player (AirPlay video, picture-in-picture) for MP4 and HLS streams and VLC for everything else, such as MKV.")
             }
             Section("About") {
                 Text("Reel plays streams from Stremio-compatible add-ons you choose. It includes no content sources of its own.")
@@ -139,5 +162,68 @@ struct DebridSettingsView: View {
         checking = true
         await debrid.refreshAccount()
         checking = false
+    }
+}
+
+struct TraktSettingsView: View {
+    @EnvironmentObject private var trakt: TraktService
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var addons: AddonStore
+    @State private var secret = ""
+    @State private var importing = false
+    @State private var imported: Int?
+
+    var body: some View {
+        Form {
+            if trakt.isConnected {
+                Section("Account") {
+                    LabeledContent("Signed in as", value: trakt.username ?? "Trakt user")
+                    Button {
+                        Task {
+                            importing = true
+                            imported = await trakt.importProgress(into: library, addons: addons)
+                            importing = false
+                        }
+                    } label: {
+                        if importing { ProgressView() } else { Text("Import progress from Trakt") }
+                    }
+                    if let imported { Text("Imported \(imported) item(s).").font(.caption).foregroundStyle(.secondary) }
+                    Button("Disconnect", role: .destructive) { trakt.disconnect() }
+                }
+                Section {
+                    Text("What you watch is sent to Trakt as you play it, and Trakt marks it watched past 80 %. Progress from your other devices is imported when Reel opens.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } else if let code = trakt.pendingCode {
+                Section("Approve on Trakt") {
+                    Text("Go to").font(.subheadline)
+                    Link(code.verification_url, destination: URL(string: code.verification_url) ?? URL(string: "https://trakt.tv/activate")!)
+                    Text("and enter this code:").font(.subheadline)
+                    Text(code.user_code).font(.system(size: 34, weight: .bold, design: .monospaced))
+                        .textSelection(.enabled)
+                    HStack { ProgressView(); Text("Waiting for approval…").foregroundStyle(.secondary) }
+                    Button("Cancel", role: .cancel) { trakt.cancelConnect() }
+                }
+            } else {
+                Section {
+                    TextField("Client ID", text: $trakt.clientId)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField(trakt.clientSecret.isEmpty ? "Client Secret" : "Secret saved. Paste to replace", text: $secret)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Save and connect") {
+                        if !secret.isEmpty { trakt.setSecret(secret); secret = "" }
+                        Task { await trakt.connect() }
+                    }
+                    .disabled(trakt.clientId.isEmpty || (trakt.clientSecret.isEmpty && secret.isEmpty))
+                    if let s = trakt.status { Text(s).font(.caption).foregroundStyle(.red) }
+                } header: {
+                    Text("Your Trakt API app")
+                } footer: {
+                    Text("Trakt needs an API app of your own (free): open trakt.tv/oauth/applications/new, enter any name, set Redirect URI to urn:ietf:wg:oauth:2.0:oob, save, and paste the Client ID and Client Secret here.")
+                }
+                Section { Link("Create a Trakt API app", destination: URL(string: "https://trakt.tv/oauth/applications/new")!) }
+            }
+        }
+        .navigationTitle("Trakt")
     }
 }

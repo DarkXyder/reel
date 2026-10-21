@@ -29,18 +29,27 @@ enum VideoZoom: String, CaseIterable, Identifiable {
 struct PlayerScreen: View {
     @StateObject private var model: PlayerModel
     @EnvironmentObject private var addons: AddonStore
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
+    @State private var nextDismissed = false
+    @State private var findingNext = false
+    private let onNext: (PlayRequest) -> Void
+    private let onSwitch: (Double) -> Void
     @State private var showControls = true
     @State private var showSettings = false
     @State private var hideTask: Task<Void, Never>?
     @State private var scrubbing: Double?
     @State private var zoom: VideoZoom = .fit
 
-    init(request: PlayRequest, library: LibraryStore) {
+    init(request: PlayRequest, library: LibraryStore, onNext: @escaping (PlayRequest) -> Void = { _ in },
+         onSwitch: @escaping (Double) -> Void = { _ in }) {
         _model = StateObject(wrappedValue: PlayerModel(request: request) { position, duration in
             library.recordProgress(request.meta, videoId: request.videoId, videoTitle: request.videoTitle,
                                    position: position, duration: duration)
         })
+        self.onNext = onNext
+        self.onSwitch = onSwitch
     }
 
     var body: some View {
@@ -74,6 +83,11 @@ struct PlayerScreen: View {
                     }
                     .foregroundStyle(.white)
                 }
+                if !model.failed {
+                    EpisodeOverlay(request: model.request, time: model.time, duration: model.duration,
+                                   skip: { model.skip(Int32($0)) }, playNext: playNext,
+                                   nextDismissed: $nextDismissed, findingNext: $findingNext)
+                }
                 if showControls || !model.isPlaying {
                     controls.transition(.opacity)
                 }
@@ -83,12 +97,16 @@ struct PlayerScreen: View {
         .persistentSystemOverlays(.hidden)
         .task { await loadSubtitles() }
         .onAppear { scheduleHide() }
-        .onChange(of: model.ended) { ended in if ended { close() } }
+        .onChange(of: model.ended) { ended in
+            guard ended else { return }
+            if settings.autoPlayNext, !nextDismissed, NextEpisode.video(after: model.request) != nil { playNext() } else { close() }
+        }
+        .onDisappear { model.stop() }
         .onChange(of: model.isPlaying) { playing in
             if playing { scheduleHide() } else { withAnimation { showControls = true } }
         }
         .sheet(isPresented: $showSettings, onDismiss: scheduleHide) {
-            PlayerSettingsSheet(model: model, zoom: $zoom)
+            PlayerSettingsSheet(model: model, zoom: $zoom, onAppleSwitch: switchToApple)
                 .presentationDetents([.medium, .large])
         }
     }
@@ -118,6 +136,7 @@ struct PlayerScreen: View {
                         }
                     }
                     Spacer()
+                    AirPlayButton().frame(width: 36, height: 36)
                     Button { openSettings() } label: { Image(systemName: "captions.bubble").padding(8) }
                     Button { openSettings() } label: { Image(systemName: "slider.horizontal.3").padding(8) }
                 }
@@ -181,6 +200,30 @@ struct PlayerScreen: View {
         }
     }
 
+    private func playNext() {
+        guard !findingNext else { return }
+        findingNext = true
+        Task {
+            let next = await NextEpisode.request(after: model.request, addons: addons, library: library)
+            findingNext = false
+            if let next {
+                model.stop()
+                onNext(next)
+            } else if model.ended {
+                close()
+            } else {
+                nextDismissed = true
+            }
+        }
+    }
+
+    private func switchToApple() {
+        showSettings = false
+        let t = model.time
+        model.stop()
+        onSwitch(t)
+    }
+
     private func openSettings() {
         hideTask?.cancel()
         showSettings = true
@@ -221,6 +264,7 @@ func speedLabel(_ r: Float) -> String {
 struct PlayerSettingsSheet: View {
     @ObservedObject var model: PlayerModel
     @Binding var zoom: VideoZoom
+    var onAppleSwitch: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var expandedLang: String?
 
@@ -299,6 +343,14 @@ struct PlayerSettingsSheet: View {
                     }
                     .pickerStyle(.segmented)
                 }
+
+                Section {
+                    Button { onAppleSwitch() } label: {
+                        Label("Continue in Apple player", systemImage: "airplayvideo")
+                    }
+                } footer: {
+                    Text("For AirPlay video to an Apple TV / AirPlay TV and picture-in-picture. Works with MP4 and HLS streams; MKV needs VLC. The AirPlay button in VLC sends sound only.")
+                }
             }
             .navigationTitle("Playback settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -357,25 +409,5 @@ struct PlayerSettingsSheet: View {
             Button { set(value + 0.1) } label: { Image(systemName: "plus.circle.fill") }.buttonStyle(.borderless)
             Button("Reset") { set(0) }.buttonStyle(.borderless).font(.caption).disabled(value == 0)
         }
-    }
-}
-
-/// Apple's player, for streams it can handle (MP4 / HLS). Gives native AirPlay to an Apple TV.
-struct ApplePlayerScreen: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-        let vc = AVPlayerViewController()
-        vc.player = AVPlayer(url: url)
-        vc.allowsPictureInPicturePlayback = true
-        vc.player?.play()
-        return vc
-    }
-
-    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {}
-
-    static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: ()) {
-        vc.player?.pause()
     }
 }

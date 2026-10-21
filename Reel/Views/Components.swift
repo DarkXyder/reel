@@ -78,21 +78,22 @@ struct PosterCard: View {
 /// Wide card with a progress bar, for "Continue watching".
 struct ContinueCard: View {
     let entry: LibraryEntry
+    var width: CGFloat = 220
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
-                PosterImage(url: entry.background ?? entry.poster, landscape: true).frame(width: 220)
+                PosterImage(url: entry.background ?? entry.poster, landscape: true).frame(width: width)
                     .overlay(ProgressOverlay(progress: VideoProgress(position: entry.position, duration: entry.duration,
                                                                      updatedAt: entry.updatedAt)))
             }
-            .frame(width: 220)
+            .frame(width: width)
             Text(entry.name).font(.caption.weight(.semibold)).lineLimit(1)
             if let t = entry.lastVideoTitle {
                 Text(t).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .frame(width: 220, alignment: .leading)
+        .frame(width: width, alignment: .leading)
     }
 }
 
