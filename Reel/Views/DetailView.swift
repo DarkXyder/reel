@@ -267,15 +267,23 @@ struct DetailView: View {
                 .padding(.horizontal)
             }
             ForEach((meta?.videos ?? []).filter { ($0.season ?? 1) == season }.sorted { $0.episodeNumber < $1.episodeNumber }) { v in
-                Button {
-                    streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: v.id,
-                                              videoTitle: NextEpisode.title(v), episodes: orderedEpisodes)
-                } label: {
-                    EpisodeRow(video: v, progress: library.progress(metaId: preview.id, videoId: v.id),
-                               downloaded: downloads.record(forVideo: v.id) != nil,
-                               downloading: downloads.isDownloading(v.id)?.fraction)
+                HStack(alignment: .center, spacing: 8) {
+                    Button {
+                        streamsFor = StreamTarget(meta: currentPreview, type: currentPreview.type, videoId: v.id,
+                                                  videoTitle: NextEpisode.title(v), episodes: orderedEpisodes)
+                    } label: {
+                        EpisodeRow(video: v, progress: library.progress(metaId: preview.id, videoId: v.id),
+                                   downloaded: downloads.record(forVideo: v.id) != nil)
+                    }
+                    .buttonStyle(.plain)
+                    // Download just this episode.
+                    if !v.isUnreleased {
+                        downloadButton(videoId: v.id, title: NextEpisode.title(v))
+                            .buttonStyle(.borderless)
+                            .font(.title3)
+                            .tint(Color.reel)
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(.horizontal)
                 .contextMenu {
                     if downloads.record(forVideo: v.id) == nil && downloads.isDownloading(v.id) == nil {
