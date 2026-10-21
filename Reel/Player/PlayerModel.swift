@@ -81,6 +81,9 @@ final class PlayerModel: ObservableObject {
     private var timer: Timer?
     private var background: NSObjectProtocol?
     private lazy var reporter = PlaybackReporter(request: request)
+    private let nowPlaying = NowPlaying()
+    private var lifecycle: [NSObjectProtocol] = []
+    private var hiddenVideoTrack: Int32?
     private var lastSaved: Double = 0
     private let onProgress: (Double, Double) -> Void
 
@@ -119,6 +122,23 @@ final class PlayerModel: ObservableObject {
                                                             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.saveProgress(force: true) }
         }
+        // Background sound: drop the picture while in the background (VLC can't draw then), keep the audio.
+        let nc = NotificationCenter.default
+        lifecycle.append(nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enteredBackground() }
+        })
+        lifecycle.append(nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enteringForeground() }
+        })
+        // Lock screen, Control Center and headphone buttons.
+        nowPlaying.activate(title: request.meta.name, subtitle: request.videoTitle, artwork: request.meta.poster,
+                            actions: .init(play: { [weak self] in self?.player.play() },
+                                           pause: { [weak self] in self?.player.pause() },
+                                           skip: { [weak self] in self?.skip(Int32($0)) },
+                                           seek: { [weak self] t in
+                                               guard let self, self.duration > 0 else { return }
+                                               self.seek(toFraction: t / self.duration)
+                                           }))
     }
 
     func stop() {
@@ -129,6 +149,9 @@ final class PlayerModel: ObservableObject {
         timer = nil
         if let background { NotificationCenter.default.removeObserver(background) }
         background = nil
+        lifecycle.forEach { NotificationCenter.default.removeObserver($0) }
+        lifecycle.removeAll()
+        nowPlaying.deactivate()
         player.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -206,7 +229,10 @@ final class PlayerModel: ObservableObject {
         time = max(0, ms / 1000)
         duration = max(0, len / 1000)
         isPlaying = player.isPlaying
-        if duration > 0 { reporter.update(playing: isPlaying, fraction: time / duration) }
+        if duration > 0 {
+            reporter.update(playing: isPlaying, fraction: time / duration)
+            nowPlaying.update(time: time, duration: duration, playing: isPlaying, rate: rate)
+        }
         switch player.state {
         case .buffering, .opening: isBuffering = !player.isPlaying
         case .error: failed = true; isBuffering = false
@@ -219,6 +245,23 @@ final class PlayerModel: ObservableObject {
         if size.width > 0 && size.height > 0 && size != videoSize { videoSize = size }
         refreshTracks()
         saveProgress(force: false)
+    }
+
+    private func enteredBackground() {
+        guard player.isPlaying else { return }
+        if AppSettings.shared.backgroundAudio {
+            hiddenVideoTrack = player.currentVideoTrackIndex
+            player.currentVideoTrackIndex = -1
+        } else {
+            player.pause()
+        }
+    }
+
+    private func enteringForeground() {
+        if let track = hiddenVideoTrack {
+            player.currentVideoTrackIndex = track
+            hiddenVideoTrack = nil
+        }
     }
 
     private func refreshTracks() {

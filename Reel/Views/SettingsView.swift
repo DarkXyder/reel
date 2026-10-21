@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var addons: AddonStore
@@ -21,6 +22,29 @@ struct SettingsView: View {
                     Label("Trakt", systemImage: "arrow.triangle.2.circlepath")
                         .badge(trakt.username ?? (trakt.isConnected ? "On" : "Off"))
                 }
+                NavigationLink { StorageView() } label: {
+                    Label("Storage & downloads", systemImage: "internaldrive")
+                }
+            }
+
+            Section("Appearance") {
+                Picker("Mode", selection: $settings.appearance) {
+                    ForEach(AppearanceMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Accent colour")
+                    HStack(spacing: 12) {
+                        ForEach(AccentChoice.allCases) { c in
+                            Button { settings.accent = c } label: {
+                                Circle().fill(c.color).frame(width: 30, height: 30)
+                                    .overlay(Circle().stroke(Color.primary, lineWidth: settings.accent == c ? 2.5 : 0).padding(-4))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(c.rawValue)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
 
             Section {
@@ -28,6 +52,7 @@ struct SettingsView: View {
                     ForEach(PlayerMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 Toggle("Play next episode automatically", isOn: $settings.autoPlayNext)
+                Toggle("Keep sound playing in the background", isOn: $settings.backgroundAudio)
                 Stepper(value: $settings.skipIntroSeconds, in: 0...300, step: 5) {
                     LabeledContent("Skip intro jumps", value: settings.skipIntroSeconds == 0 ? "Off" : "\(settings.skipIntroSeconds) s")
                 }
@@ -225,5 +250,87 @@ struct TraktSettingsView: View {
             }
         }
         .navigationTitle("Trakt")
+    }
+}
+
+/// Where downloads go, how much space they use, and clean-up.
+struct StorageView: View {
+    @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var settings: AppSettings
+    @State private var picking = false
+    @State private var confirmDeleteAll = false
+    @State private var cacheBytes = URLCache.shared.currentDiskUsage
+    @State private var pickError: String?
+
+    private func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Save to", value: FolderAccess.name(settings.downloadFolderBookmark))
+                Button("Choose a folder in Files…") { picking = true }
+                if settings.downloadFolderBookmark != nil {
+                    Button("Use Reel’s own folder") { settings.downloadFolderBookmark = nil }
+                }
+                if let pickError { Text(pickError).font(.caption).foregroundStyle(.red) }
+            } header: {
+                Text("Download location")
+            } footer: {
+                Text("Reel’s own folder is in the Files app under On My iPhone → Reel → Downloads. A chosen folder can be on iCloud Drive or a USB drive. New downloads go there; existing ones stay where they are.")
+            }
+
+            Section("Space") {
+                LabeledContent("Downloads", value: bytes(downloads.totalSize))
+                if let free = DownloadManager.freeSpace { LabeledContent("Free on this iPhone", value: bytes(free)) }
+                LabeledContent("Image cache", value: bytes(Int64(cacheBytes)))
+                Button("Clear image cache") {
+                    URLCache.shared.removeAllCachedResponses()
+                    cacheBytes = URLCache.shared.currentDiskUsage
+                }
+            }
+
+            Section {
+                Toggle("Delete downloads after watching", isOn: $settings.deleteWatchedDownloads)
+                let watched = downloads.watchedDownloads(library)
+                Button("Delete watched downloads (\(watched.count))") { watched.forEach(downloads.delete) }
+                    .disabled(watched.isEmpty)
+                Button("Delete all downloads", role: .destructive) { confirmDeleteAll = true }
+                    .disabled(downloads.records.isEmpty)
+            } footer: {
+                Text("A video counts as watched once you've seen 92 % of it.")
+            }
+
+            if !downloads.records.isEmpty {
+                Section("Largest downloads") {
+                    ForEach(downloads.records.sorted { downloads.fileSize($0) > downloads.fileSize($1) }.prefix(20)) { r in
+                        HStack {
+                            Text(r.displayTitle).lineLimit(1)
+                            Spacer()
+                            Text(bytes(downloads.fileSize(r))).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        .font(.subheadline)
+                        .swipeActions { Button(role: .destructive) { downloads.delete(r) } label: { Label("Delete", systemImage: "trash") } }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Storage & downloads")
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
+            switch result {
+            case .success(let url):
+                if let data = FolderAccess.bookmark(for: url) {
+                    settings.downloadFolderBookmark = data
+                    pickError = nil
+                } else {
+                    pickError = "Couldn't get access to that folder."
+                }
+            case .failure(let e):
+                pickError = e.localizedDescription
+            }
+        }
+        .confirmationDialog("Delete all downloads?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
+            Button("Delete all", role: .destructive) { downloads.deleteAll() }
+        }
     }
 }

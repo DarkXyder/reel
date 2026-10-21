@@ -21,7 +21,7 @@ struct LibraryView: View {
                             Image(systemName: "chevron.right").foregroundStyle(.secondary)
                         }
                         .padding()
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal)
@@ -35,7 +35,7 @@ struct LibraryView: View {
                             Image(systemName: "chevron.right").foregroundStyle(.secondary)
                         }
                         .padding()
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal)
@@ -170,7 +170,7 @@ struct DownloadsView: View {
                             Text(r.displayTitle).font(.subheadline.weight(.semibold)).lineLimit(2)
                             switch r.state {
                             case .downloading:
-                                ProgressView(value: r.fraction).tint(Color.accentColor)
+                                ProgressView(value: r.fraction).tint(Color.reel)
                                 Text(r.total > 0
                                      ? "\(ByteCountFormatter.string(fromByteCount: r.received, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: r.total, countStyle: .file))"
                                      : "Starting…")

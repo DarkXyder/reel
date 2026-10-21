@@ -395,7 +395,7 @@ struct PlayerSettingsSheet: View {
             HStack {
                 Text(title).foregroundStyle(.primary)
                 Spacer()
-                if selected { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
+                if selected { Image(systemName: "checkmark").foregroundStyle(Color.reel) }
             }
         }
     }

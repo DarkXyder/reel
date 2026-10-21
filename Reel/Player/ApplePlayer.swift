@@ -19,6 +19,11 @@ final class ApplePlayerModel: ObservableObject {
     private let onProgress: (Double, Double) -> Void
     private lazy var reporter = PlaybackReporter(request: request)
     private var stopped = false
+    private let nowPlaying = NowPlaying()
+    private var lifecycle: [NSObjectProtocol] = []
+    /// The on-screen controller; detached from the player in the background so sound keeps going.
+    weak var controller: AVPlayerViewController?
+    var pictureInPictureActive = false
 
     init(request: PlayRequest, onProgress: @escaping (Double, Double) -> Void) {
         self.request = request
@@ -51,6 +56,27 @@ final class ApplePlayerModel: ObservableObject {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
+        nowPlaying.activate(title: request.meta.name, subtitle: request.videoTitle, artwork: request.meta.poster,
+                            actions: .init(play: { [weak self] in self?.player.play() },
+                                           pause: { [weak self] in self?.player.pause() },
+                                           skip: { [weak self] in self?.skip($0) },
+                                           seek: { [weak self] in self?.player.seek(to: CMTime(seconds: $0, preferredTimescale: 600)) }))
+        let nc = NotificationCenter.default
+        lifecycle.append(nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enteredBackground() }
+        })
+        lifecycle.append(nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.controller?.player = self?.player }
+        })
+    }
+
+    private func enteredBackground() {
+        guard !pictureInPictureActive else { return }
+        if AppSettings.shared.backgroundAudio {
+            controller?.player = nil // video layers pause in the background; detached, the sound continues
+        } else {
+            player.pause()
+        }
     }
 
     func stop() {
@@ -62,6 +88,9 @@ final class ApplePlayerModel: ObservableObject {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         statusObserver = nil
+        lifecycle.forEach { NotificationCenter.default.removeObserver($0) }
+        lifecycle.removeAll()
+        nowPlaying.deactivate()
     }
 
     func skip(_ seconds: Double) {
@@ -73,7 +102,10 @@ final class ApplePlayerModel: ObservableObject {
         guard t.isFinite else { return }
         time = t
         if let d = player.currentItem?.duration.seconds, d.isFinite, d > 0 { duration = d }
-        if duration > 0 { reporter.update(playing: player.rate > 0, fraction: time / duration) }
+        if duration > 0 {
+            reporter.update(playing: player.rate > 0, fraction: time / duration)
+            nowPlaying.update(time: time, duration: duration, playing: player.rate > 0, rate: player.rate)
+        }
         save(force: false)
     }
 
@@ -92,18 +124,35 @@ final class ApplePlayerModel: ObservableObject {
 }
 
 private struct AVPlayerControllerView: UIViewControllerRepresentable {
-    let player: AVPlayer
+    let model: ApplePlayerModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
-        vc.player = player
+        vc.player = model.player
         vc.allowsPictureInPicturePlayback = true
         vc.canStartPictureInPictureAutomaticallyFromInline = true
-        vc.updatesNowPlayingInfoCenter = true
+        vc.updatesNowPlayingInfoCenter = false // Reel fills in title, artwork and controls itself
+        vc.delegate = context.coordinator
+        model.controller = vc
         return vc
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
+        let model: ApplePlayerModel
+        init(model: ApplePlayerModel) { self.model = model }
+
+        func playerViewControllerDidStartPictureInPicture(_ vc: AVPlayerViewController) {
+            Task { @MainActor in self.model.pictureInPictureActive = true }
+        }
+
+        func playerViewControllerDidStopPictureInPicture(_ vc: AVPlayerViewController) {
+            Task { @MainActor in self.model.pictureInPictureActive = false }
+        }
+    }
 }
 
 /// Apple's player screen: system controls (AirPlay, picture-in-picture, speed, subtitles for HLS),
@@ -153,7 +202,7 @@ struct ApplePlayerScreen: View {
             .background(Color.black)
 
             ZStack {
-                AVPlayerControllerView(player: model.player)
+                AVPlayerControllerView(model: model)
                 if let failed = model.failed {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle").font(.largeTitle)

@@ -59,6 +59,14 @@ struct SearchView: View {
         guard !text.isEmpty else { results = []; return }
         searching = true
         defer { searching = false }
+        let found = await Self.search(text, addons: addons)
+        guard text == query.trimmingCharacters(in: .whitespaces) else { return }
+        results = found
+    }
+
+    /// Searches every add-on catalog that supports search, in add-on order.
+    @MainActor
+    static func search(_ text: String, addons: AddonStore) async -> [SearchSection] {
         var found: [SearchSection] = []
         let sources = addons.searchCatalogs
         await withTaskGroup(of: SearchSection?.self) { group in
@@ -73,8 +81,49 @@ struct SearchView: View {
             }
             for await s in group { if let s { found.append(s) } }
         }
-        guard text == query.trimmingCharacters(in: .whitespaces) else { return }
         let order = sources.map(\.id)
-        results = found.sorted { (order.firstIndex(of: $0.id) ?? 0) < (order.firstIndex(of: $1.id) ?? 0) }
+        return found.sorted { (order.firstIndex(of: $0.id) ?? 0) < (order.firstIndex(of: $1.id) ?? 0) }
+    }
+}
+
+/// Pushed when tapping a cast member.
+struct SearchQuery: Hashable {
+    let text: String
+}
+
+struct SearchResultsView: View {
+    let query: String
+    @EnvironmentObject private var addons: AddonStore
+    @State private var results: [SearchView.SearchSection] = []
+    @State private var loading = true
+    private let columns = [GridItem(.adaptive(minimum: 104), spacing: 12)]
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 22) {
+                ForEach(results) { section in
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeader(title: section.title)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                            ForEach(section.items) { m in
+                                NavigationLink(value: m) { PosterCard(meta: m, width: 104) }.buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+            }
+            .padding(.vertical)
+            if !loading && results.isEmpty {
+                EmptyState(icon: "questionmark", title: "No results", message: "Nothing found for \(query).")
+            }
+        }
+        .overlay { if loading { ProgressView() } }
+        .navigationTitle(query)
+        .task {
+            guard results.isEmpty else { return }
+            results = await SearchView.search(query, addons: addons)
+            loading = false
+        }
     }
 }

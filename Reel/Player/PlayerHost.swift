@@ -24,6 +24,7 @@ struct PlayerHost: View {
             }
         }
         .id(current.id)
+        .preferredColorScheme(.dark) // the player stays dark in Light mode too
     }
 
     private func switchPlayer(to mode: PlayerMode, at time: Double) {
@@ -65,26 +66,26 @@ enum NextEpisode {
     @MainActor
     static func request(after r: PlayRequest, addons: AddonStore, library: LibraryStore) async -> PlayRequest? {
         guard let next = video(after: r) else { return nil }
-        var providers = addons.supporting("stream", type: r.type, id: next.id)
-        if let same = r.addonId, let i = providers.firstIndex(where: { $0.id == same }) {
-            providers.insert(providers.remove(at: i), at: 0)
-        }
-        for addon in providers {
-            guard let streams = try? await AddonClient.shared.streams(addon, type: r.type, videoId: next.id) else { continue }
-            let playable = streams.filter { $0.url != nil }
-            let pick = playable.first(where: { r.bingeGroup != nil && $0.behaviorHints?.bingeGroup == r.bingeGroup })
-                ?? playable.max(by: { $0.quality < $1.quality })
-            guard let s = pick, let u = s.url, let url = URL(string: u) else { continue }
-            var req = PlayRequest(url: url, meta: r.meta, type: r.type, videoId: next.id, videoTitle: title(next),
-                                  streamSubtitles: s.subtitles ?? [], headers: s.behaviorHints?.proxyHeaders?.request ?? [:],
+        // A downloaded copy wins: works offline too.
+        if let local = DownloadManager.shared.record(forVideo: next.id) {
+            var req = PlayRequest(url: DownloadManager.shared.localURL(local), meta: r.meta, type: r.type, videoId: next.id,
+                                  videoTitle: title(next), streamSubtitles: [], headers: [:],
                                   resumeAt: library.resumePosition(metaId: r.meta.id, videoId: next.id))
-            req.addonId = addon.id
-            req.bingeGroup = s.behaviorHints?.bingeGroup
-            req.fileExtension = s.fileExtension
+            req.fileExtension = local.fileExtension
             req.episodes = r.episodes
             return req
         }
-        return nil
+        guard let pick = await StreamPicker.best(type: r.type, videoId: next.id, addons: addons,
+                                                 preferAddon: r.addonId, bingeGroup: r.bingeGroup) else { return nil }
+        let s = pick.stream
+        var req = PlayRequest(url: pick.url, meta: r.meta, type: r.type, videoId: next.id, videoTitle: title(next),
+                              streamSubtitles: s.subtitles ?? [], headers: s.behaviorHints?.proxyHeaders?.request ?? [:],
+                              resumeAt: library.resumePosition(metaId: r.meta.id, videoId: next.id))
+        req.addonId = pick.addon.id
+        req.bingeGroup = s.behaviorHints?.bingeGroup
+        req.fileExtension = s.fileExtension
+        req.episodes = r.episodes
+        return req
     }
 }
 
@@ -138,7 +139,7 @@ struct EpisodeOverlay: View {
             .padding(.bottom, 90)
         }
         .foregroundStyle(.white)
-        .tint(Color.accentColor)
+        .tint(Color.reel)
     }
 }
 
@@ -156,7 +157,7 @@ struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
         v.tintColor = .white
-        v.activeTintColor = UIColor(named: "AccentColor") ?? .systemRed
+        v.activeTintColor = UIColor(AppSettings.shared.accent.color)
         v.prioritizesVideoDevices = true
         return v
     }

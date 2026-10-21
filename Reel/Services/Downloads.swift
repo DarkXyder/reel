@@ -17,6 +17,8 @@ struct DownloadRecord: Codable, Identifiable, Hashable {
     var total: Int64
     let created: Date
     var error: String?
+    /// Folder picked in Files (security-scoped bookmark); nil = Reel's own Downloads folder.
+    var folderBookmark: Data?
 
     var fileName: String { "\(id).\(fileExtension)" }
     var fraction: Double { total > 0 ? Double(received) / Double(total) : 0 }
@@ -74,7 +76,48 @@ final class DownloadManager: ObservableObject {
         }
     }
 
-    func localURL(_ r: DownloadRecord) -> URL { Self.folder.appendingPathComponent(r.fileName) }
+    func localURL(_ r: DownloadRecord) -> URL {
+        (r.folderBookmark.flatMap(FolderAccess.resolve) ?? Self.folder).appendingPathComponent(r.fileName)
+    }
+
+    func fileSize(_ r: DownloadRecord) -> Int64 {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: localURL(r).path)
+        return (attrs?[.size] as? NSNumber)?.int64Value ?? (r.state == .done ? r.total : r.received)
+    }
+
+    var totalSize: Int64 { records.filter { $0.state == .done }.reduce(0) { $0 + fileSize($1) } }
+
+    static var freeSpace: Int64? {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage
+    }
+
+    func isDownloading(_ videoId: String) -> DownloadRecord? {
+        records.first { $0.videoId == videoId && $0.state == .downloading }
+    }
+
+    /// Finds the best stream itself (same rules as auto-play) and downloads it.
+    @discardableResult
+    func downloadBest(meta: MetaPreview, type: String, videoId: String, videoTitle: String?, addons: AddonStore) async -> Bool {
+        if record(forVideo: videoId) != nil || isDownloading(videoId) != nil { return true }
+        guard let pick = await StreamPicker.best(type: type, videoId: videoId, addons: addons) else { return false }
+        start(url: pick.url, meta: meta, type: type, videoId: videoId, videoTitle: videoTitle,
+              fileExtension: pick.stream.fileExtension)
+        return true
+    }
+
+    func watchedDownloads(_ library: LibraryStore) -> [DownloadRecord] {
+        records.filter { $0.state == .done && library.progress(metaId: $0.meta.id, videoId: $0.videoId)?.isWatched == true }
+    }
+
+    /// "Delete downloads after watching".
+    func cleanUpWatched(_ library: LibraryStore) {
+        guard AppSettings.shared.deleteWatchedDownloads else { return }
+        watchedDownloads(library).forEach(delete)
+    }
+
+    func deleteAll() { records.forEach(delete) }
 
     func record(forVideo videoId: String) -> DownloadRecord? {
         records.first { $0.videoId == videoId && $0.state == .done }
@@ -85,7 +128,8 @@ final class DownloadManager: ObservableObject {
         let ext = (fileExtension?.isEmpty == false ? fileExtension! : (url.pathExtension.isEmpty ? "mkv" : url.pathExtension)).lowercased()
         let r = DownloadRecord(id: UUID().uuidString, meta: meta, type: type, videoId: videoId, videoTitle: videoTitle,
                                remoteURL: url.absoluteString, fileExtension: ext, state: .downloading,
-                               received: 0, total: 0, created: Date(), error: nil)
+                               received: 0, total: 0, created: Date(), error: nil,
+                               folderBookmark: AppSettings.shared.downloadFolderBookmark)
         records.insert(r, at: 0)
         save()
         let task = session.downloadTask(with: url)
@@ -156,11 +200,13 @@ final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
             Task { @MainActor in DownloadManager.shared.finished(id: id, error: "HTTP \(http.statusCode)") }
             return
         }
-        // Find the destination name from the saved index (extension may differ per download).
-        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Downloads", isDirectory: true)
+        // Destination from the saved index: extension and folder can differ per download.
+        let saved = Self.savedRecord(id: id)
+        let folder = saved?.folderBookmark.flatMap(FolderAccess.resolve)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let ext = Self.savedExtension(id: id) ?? "mkv"
+        let ext = saved?.fileExtension ?? "mkv"
         let dest = folder.appendingPathComponent("\(id).\(ext)")
         try? FileManager.default.removeItem(at: dest)
         do {
@@ -186,12 +232,35 @@ final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    private static func savedExtension(id: String) -> String? {
+    private static func savedRecord(id: String) -> DownloadRecord? {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("downloads.json")
         guard let data = try? Data(contentsOf: url),
               let records = try? JSONDecoder().decode([DownloadRecord].self, from: data) else { return nil }
-        return records.first { $0.id == id }?.fileExtension
+        return records.first { $0.id == id }
+    }
+}
+
+/// A folder chosen in the Files app, kept across launches with a security-scoped bookmark.
+enum FolderAccess {
+    static func bookmark(for url: URL) -> Data? {
+        let ok = url.startAccessingSecurityScopedResource()
+        defer { if ok { url.stopAccessingSecurityScopedResource() } }
+        return try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+
+    /// Resolves and opens the folder (access stays open while the app runs).
+    static func resolve(_ data: Data) -> URL? {
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+        else { return nil }
+        _ = url.startAccessingSecurityScopedResource()
+        return url
+    }
+
+    static func name(_ data: Data?) -> String {
+        guard let data, let url = resolve(data) else { return "Reel → Downloads" }
+        return url.lastPathComponent
     }
 }
 

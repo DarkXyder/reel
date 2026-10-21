@@ -25,6 +25,35 @@ struct LenientString: Codable, Hashable {
     }
 }
 
+/// A list that add-ons send either as ["a", "b"] or as "a, b".
+struct LenientList: Codable, Hashable {
+    let values: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let a = try? c.decode([String].self) { values = a }
+        else if let s = try? c.decode(String.self) {
+            values = s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        } else { values = [] }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(values)
+    }
+}
+
+/// YouTube trailer: Cinemeta sends `trailers` ({source, type}) and newer `trailerStreams` ({ytId, title}).
+struct Trailer: Codable, Hashable {
+    let source: String?
+    let type: String?
+}
+
+struct TrailerStream: Codable, Hashable {
+    let ytId: String?
+    let title: String?
+}
+
 struct Manifest: Codable, Hashable {
     let id: String
     let name: String
@@ -144,6 +173,44 @@ struct MetaDetail: Codable, Hashable {
     let genres: [String]?
     let imdbRating: LenientString?
     let videos: [Video]?
+    let cast: LenientList?
+    let director: LenientList?
+    let writer: LenientList?
+    let trailers: [Trailer]?
+    let trailerStreams: [TrailerStream]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, name, poster, background, logo, description, releaseInfo, runtime, genres, imdbRating, videos
+        case cast, director, writer, trailers, trailerStreams
+    }
+
+    /// Only id/type/name are required; anything else that is missing or malformed is skipped
+    /// instead of failing the whole page.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        type = (try? c.decode(String.self, forKey: .type)) ?? "movie"
+        name = (try? c.decode(String.self, forKey: .name)) ?? id
+        poster = try? c.decodeIfPresent(String.self, forKey: .poster)
+        background = try? c.decodeIfPresent(String.self, forKey: .background)
+        logo = try? c.decodeIfPresent(String.self, forKey: .logo)
+        description = try? c.decodeIfPresent(String.self, forKey: .description)
+        releaseInfo = try? c.decodeIfPresent(LenientString.self, forKey: .releaseInfo)
+        runtime = (try? c.decodeIfPresent(LenientString.self, forKey: .runtime))?.value
+        genres = (try? c.decodeIfPresent(LenientList.self, forKey: .genres))?.values
+        imdbRating = try? c.decodeIfPresent(LenientString.self, forKey: .imdbRating)
+        videos = try? c.decodeIfPresent([Video].self, forKey: .videos)
+        cast = try? c.decodeIfPresent(LenientList.self, forKey: .cast)
+        director = try? c.decodeIfPresent(LenientList.self, forKey: .director)
+        writer = try? c.decodeIfPresent(LenientList.self, forKey: .writer)
+        trailers = try? c.decodeIfPresent([Trailer].self, forKey: .trailers)
+        trailerStreams = try? c.decodeIfPresent([TrailerStream].self, forKey: .trailerStreams)
+    }
+
+    /// YouTube id of the first trailer, if any.
+    var trailerYouTubeId: String? {
+        trailerStreams?.compactMap(\.ytId).first ?? trailers?.compactMap(\.source).first
+    }
 
     var preview: MetaPreview {
         MetaPreview(id: id, type: type, name: name, poster: poster, posterShape: nil,

@@ -9,6 +9,8 @@ struct ReelApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var downloads = DownloadManager.shared
     @StateObject private var trakt = TraktService.shared
+    @StateObject private var upNext = UpNextService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Posters are loaded with AsyncImage, which uses the shared URL cache.
@@ -24,11 +26,17 @@ struct ReelApp: App {
                 .environmentObject(settings)
                 .environmentObject(downloads)
                 .environmentObject(trakt)
-                .preferredColorScheme(.dark)
-                .tint(Color.accentColor)
+                .environmentObject(upNext)
+                .preferredColorScheme(settings.appearance.scheme)
+                .tint(settings.accent.color)
+                .id(settings.accent) // redraw everything in the new accent colour
                 .task {
                     // Bring in progress from other devices.
                     if trakt.isConnected { await trakt.importProgress(into: library, addons: addons) }
+                    downloads.cleanUpWatched(library)
+                }
+                .onChange(of: scenePhase) { phase in
+                    if phase == .active { downloads.cleanUpWatched(library) }
                 }
         }
     }

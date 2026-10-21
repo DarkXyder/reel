@@ -109,7 +109,7 @@ struct StreamsView: View {
         Button(action: action) {
             Text(title).font(.caption.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(selected ? Color.accentColor : Color.white.opacity(0.1), in: Capsule())
+                .background(selected ? Color.reel : Color.primary.opacity(0.1), in: Capsule())
                 .foregroundStyle(selected ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
@@ -159,7 +159,7 @@ struct StreamsView: View {
                     if s.quality != .unknown {
                         Text(s.quality.label).font(.caption2.weight(.bold))
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(s.quality >= .hd1080 ? Color.accentColor : Color.gray.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+                            .background(s.quality >= .hd1080 ? Color.reel : Color.gray.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
                             .foregroundStyle(.white)
                     }
                     if let size = s.sizeBytes {

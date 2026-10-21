@@ -7,7 +7,7 @@ struct PosterImage: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.06))
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06))
             if let s = url, let u = URL(string: s) {
                 AsyncImage(url: u, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
                     if let image = phase.image {
@@ -24,7 +24,7 @@ struct PosterImage: View {
         }
         .aspectRatio(landscape ? 16.0 / 9.0 : 2.0 / 3.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
     }
 }
 
@@ -39,14 +39,14 @@ struct ProgressOverlay: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 18))
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, Color.accentColor)
+                        .foregroundStyle(.white, Color.reel)
                         .padding(6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.black.opacity(0.55))
-                        Capsule().fill(Color.accentColor).frame(width: max(4, g.size.width * p.fraction))
+                        Capsule().fill(Color.reel).frame(width: max(4, g.size.width * p.fraction))
                     }
                 }
                 .frame(height: 4)

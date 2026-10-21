@@ -3,7 +3,9 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject private var addons: AddonStore
     @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var upNext: UpNextService
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var streamsFor: StreamTarget?
 
     var body: some View {
         ScrollView {
@@ -30,6 +32,28 @@ struct HomeView: View {
                         }
                     }
                 }
+                if !upNext.items.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeader(title: "Up next")
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 14) {
+                                ForEach(upNext.items) { item in
+                                    Button {
+                                        streamsFor = StreamTarget(meta: item.entry.preview, type: item.entry.type, videoId: item.video.id,
+                                                                  videoTitle: NextEpisode.title(item.video), episodes: item.episodes)
+                                    } label: {
+                                        UpNextCard(item: item, width: sizeClass == .regular ? 300 : 220)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        NavigationLink(value: item.entry.preview) { Label("Show details", systemImage: "info.circle") }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                }
                 ForEach(addons.homeCatalogs) { row in
                     CatalogRow(source: row)
                 }
@@ -45,7 +69,35 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: MetaPreview.self) { DetailView(preview: $0) }
         .navigationDestination(for: CatalogRef.self) { CatalogGridView(source: $0) }
-        .refreshable { await addons.refreshAll() }
+        .refreshable {
+            await addons.refreshAll()
+            await upNext.refresh(library: library, addons: addons)
+        }
+        .onAppear { Task { await upNext.refresh(library: library, addons: addons) } }
+        .sheet(item: $streamsFor) { target in
+            StreamsView(target: target).presentationDetents([.medium, .large])
+        }
+    }
+}
+
+/// Next episode card: its thumbnail, the show, and "S2E4 · Title".
+struct UpNextCard: View {
+    let item: UpNextItem
+    var width: CGFloat = 220
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PosterImage(url: item.video.thumbnail ?? item.entry.background ?? item.entry.poster, landscape: true)
+                .frame(width: width)
+                .overlay(alignment: .bottomLeading) {
+                    Label("Next", systemImage: "play.fill").font(.caption2.weight(.bold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.reel, in: Capsule()).foregroundStyle(.white).padding(8)
+                }
+            Text(item.entry.name).font(.caption.weight(.semibold)).lineLimit(1)
+            Text(NextEpisode.title(item.video)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(width: width, alignment: .leading)
     }
 }
 
@@ -65,7 +117,7 @@ struct FeaturedBanner: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
         .frame(height: sizeClass == .regular ? 460 : 300)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .task {
             guard items.isEmpty else { return }
             let all = (try? await AddonClient.shared.catalog(source.addon, source.catalog)) ?? []
@@ -136,7 +188,7 @@ struct CatalogRow: View {
                 LazyHStack(alignment: .top, spacing: 12) {
                     if !loaded {
                         ForEach(0..<6, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)).frame(width: width, height: width * 1.5)
+                            RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)).frame(width: width, height: width * 1.5)
                         }
                     }
                     ForEach(items) { m in
