@@ -35,7 +35,7 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build | tee build.log | grep -E "error:|warning: .*Reel/|BUILD (SUCCEEDED|FAILED)" || true
-          test -d build/Build/Products/Release-iphoneos/Reel.app
+          test -f build/Build/Products/Release-iphoneos/Reel.app/Reel
 
       - name: Package IPA
         run: |
